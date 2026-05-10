@@ -137,6 +137,8 @@ class ShellCommands:
             "man": self.cmd_man,
             "neofetch": self.cmd_neofetch,
             "cowsay": self.cmd_cowsay,
+            "io": self.cmd_io,
+            "iostat": self.cmd_iostat,
         }
 
         if cmd in commands:
@@ -718,7 +720,11 @@ Other:
   clear                       Clear screen
   help                        Show this help
   neofetch                    System info display
-  man <cmd>                   Manual page"""
+  man <cmd>                   Manual page
+
+I/O:
+  io <device> <type> [data]   Send I/O request
+  iostat                      I/O request status"""
         return help_text, 0
 
     def cmd_history(self, args):
@@ -782,6 +788,7 @@ Other:
             f"VirtualOS - {datetime.now().strftime('%H:%M:%S')} up {self.kernel.get_uptime()}",
             f"Tasks: {self.pm.get_process_count()} total, "
             f"{len(self.pm.get_running_processes())} running, "
+            f"{sum(1 for p in procs if p.state == 'Ready')} ready, "
             f"{sum(1 for p in procs if p.state == 'Sleeping')} sleeping, "
             f"{sum(1 for p in procs if p.state == 'Stopped')} stopped",
             f"%Cpu(s): 15.0 us,  5.0 sy,  0.0 ni, 80.0 id",
@@ -860,6 +867,45 @@ Other:
             r"                ||----w |",
             r"                ||     ||",
         ]
+        return "\n".join(lines), 0
+
+    # ====== I/O COMMANDS ======
+
+    def cmd_io(self, args):
+        """Send an I/O request. Usage: io <device_name> <read|write|input|output> [data]"""
+        if len(args) < 2:
+            return "Usage: io <device_name> <read|write|input|output> [data]", 1
+
+        device_name = args[0]
+        request_type = args[1].capitalize()
+        data = " ".join(args[2:]) if len(args) > 2 else ""
+
+        valid_types = ["Read", "Write", "Input", "Output"]
+        if request_type not in valid_types:
+            return f"Invalid I/O type. Valid: {', '.join(valid_types)}", 1
+
+        success, msg = self.dm.send_io_request(device_name, request_type, data)
+        return msg, 0 if success else 1
+
+    def cmd_iostat(self, args):
+        """Show I/O request status."""
+        requests = self.dm.get_io_requests(20)
+        if not requests:
+            return "No I/O requests in queue.", 0
+
+        lines = [
+            f"{'ID':<6} {'Device':<30} {'Type':<10} {'State':<12} {'Time':<10} {'Result'}",
+            "-" * 100,
+        ]
+        for req in requests:
+            d = req.to_dict()
+            lines.append(
+                f"{d['id']:<6} {d['device']:<30} {d['type']:<10} {d['state']:<12} {d['timestamp']:<10} {d['result']}"
+            )
+
+        pending = self.dm.get_io_pending_count()
+        lines.append("")
+        lines.append(f"Pending: {pending}")
         return "\n".join(lines), 0
 
     @staticmethod

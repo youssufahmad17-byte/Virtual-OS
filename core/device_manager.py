@@ -1,4 +1,115 @@
 """Device Manager - Virtual I/O device management."""
+import time
+import random
+
+
+class IORequestState:
+    PENDING = "Pending"
+    PROCESSING = "Processing"
+    COMPLETED = "Completed"
+    FAILED = "Failed"
+
+
+class IORequestType:
+    READ = "Read"
+    WRITE = "Write"
+    INPUT = "Input"
+    OUTPUT = "Output"
+
+
+class IORequest:
+    """Represents an I/O request to a device."""
+
+    def __init__(self, device_name, request_type, data="", pid=0):
+        self.id = random.randint(1000, 9999)
+        self.device_name = device_name
+        self.request_type = request_type
+        self.data = data
+        self.pid = pid
+        self.state = IORequestState.PENDING
+        self.timestamp = time.time()
+        self.completed_time = None
+        self.result = ""
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "device": self.device_name,
+            "type": self.request_type,
+            "state": self.state,
+            "pid": self.pid,
+            "timestamp": time.strftime("%H:%M:%S", time.localtime(self.timestamp)),
+            "result": self.result,
+        }
+
+
+class IOQueue:
+    """Manages I/O requests for all devices."""
+
+    def __init__(self):
+        self.pending = []
+        self.completed = []
+        self.max_history = 50
+
+    def add_request(self, request):
+        """Add an I/O request to the pending queue."""
+        self.pending.append(request)
+        return request
+
+    def process_next(self):
+        """Process the next pending I/O request."""
+        if not self.pending:
+            return None
+
+        req = self.pending[0]
+        req.state = IORequestState.PROCESSING
+
+        # Simulate processing (random success/failure)
+        success = random.random() < 0.95  # 95% success rate
+
+        if success:
+            req.state = IORequestState.COMPLETED
+            req.completed_time = time.time()
+            if req.request_type == IORequestType.READ:
+                req.result = f"Read {len(req.data) if req.data else 0} bytes from {req.device_name}"
+            elif req.request_type == IORequestType.WRITE:
+                req.result = f"Wrote {len(req.data) if req.data else 0} bytes to {req.device_name}"
+            elif req.request_type == IORequestType.INPUT:
+                req.result = f"Input received from {req.device_name}"
+            elif req.request_type == IORequestType.OUTPUT:
+                req.result = f"Output sent to {req.device_name}"
+        else:
+            req.state = IORequestState.FAILED
+            req.completed_time = time.time()
+            req.result = f"I/O error on {req.device_name}"
+
+        self.pending.pop(0)
+        self.completed.insert(0, req)
+
+        # Trim history
+        if len(self.completed) > self.max_history:
+            self.completed = self.completed[:self.max_history]
+
+        return req
+
+    def process_all(self):
+        """Process all pending requests."""
+        processed = []
+        while self.pending:
+            req = self.process_next()
+            if req:
+                processed.append(req)
+        return processed
+
+    def get_pending_count(self):
+        return len(self.pending)
+
+    def get_completed_count(self):
+        return len(self.completed)
+
+    def get_requests(self, limit=20):
+        """Get recent requests (completed + pending)."""
+        return self.completed[:limit] + self.pending
 
 
 class DeviceState:
@@ -39,6 +150,7 @@ class DeviceManager:
 
     def __init__(self):
         self.devices = []
+        self.io_queue = IOQueue()
         self._init_devices()
 
     def _init_devices(self):
@@ -158,3 +270,32 @@ class DeviceManager:
 
     def get_online_count(self):
         return sum(1 for d in self.devices if d.state == DeviceState.ONLINE)
+
+    def send_io_request(self, device_name, request_type, data="", pid=0):
+        """Send an I/O request to a device."""
+        dev = self.get_device(device_name)
+        if dev is None:
+            return False, f"Device '{device_name}' not found"
+        if not dev.enabled:
+            return False, f"Device '{device_name}' is disabled"
+        if dev.state == DeviceState.OFFLINE:
+            return False, f"Device '{device_name}' is offline"
+
+        request = IORequest(device_name, request_type, data, pid)
+        self.io_queue.add_request(request)
+        return True, f"I/O request #{request.id} queued for {device_name}"
+
+    def process_io(self):
+        """Process one pending I/O request."""
+        return self.io_queue.process_next()
+
+    def process_all_io(self):
+        """Process all pending I/O requests."""
+        return self.io_queue.process_all()
+
+    def get_io_requests(self, limit=20):
+        """Get recent I/O requests."""
+        return self.io_queue.get_requests(limit)
+
+    def get_io_pending_count(self):
+        return self.io_queue.get_pending_count()

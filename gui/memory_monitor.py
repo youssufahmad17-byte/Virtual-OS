@@ -1,11 +1,69 @@
 """Memory Monitor Window."""
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QProgressBar, QTableWidget,
-    QTableWidgetItem, QHeaderView, QWidget
+    QTableWidgetItem, QHeaderView, QWidget, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QPainter
 from gui.window import BaseWindow
+
+
+class MemoryMapWidget(QWidget):
+    """Visual block-level memory map showing free vs allocated blocks."""
+
+    BLOCK_HEIGHT = 24
+
+    def __init__(self, memory_manager):
+        super().__init__()
+        self.mm = memory_manager
+        self.setMinimumHeight(self.BLOCK_HEIGHT + 20)
+        self.setStyleSheet("background-color: transparent;")
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        blocks = self.mm.blocks
+        if not blocks:
+            return
+
+        total = self.mm.total_kb
+        width = self.width()
+        x = 0
+        colors = self._get_process_colors()
+
+        for block in blocks:
+            block_width = max(2, int((block.size / total) * width))
+            if block.free:
+                painter.setPen(QColor("#45475a"))
+                painter.setBrush(QColor("#313244"))
+            else:
+                color = colors.get(block.pid, QColor("#89b4fa"))
+                painter.setPen(color.darker(150))
+                painter.setBrush(color)
+
+            painter.drawRect(int(x), 0, block_width, self.BLOCK_HEIGHT)
+            x += block_width
+
+        # Draw block borders
+        x = 0
+        painter.setPen(QColor("#1e1e2e"))
+        for block in blocks:
+            block_width = max(2, int((block.size / total) * width))
+            painter.drawRect(int(x), 0, block_width, self.BLOCK_HEIGHT)
+            x += block_width
+
+    def _get_process_colors(self):
+        colors = {}
+        palette = [
+            QColor("#a6e3a1"), QColor("#89b4fa"), QColor("#f9e2af"),
+            QColor("#cba6f7"), QColor("#fab387"), QColor("#f38ba8"),
+            QColor("#94e2d5"), QColor("#74c7ec"), QColor("#b4befe"),
+        ]
+        breakdown = self.mm.get_process_breakdown()
+        for i, pid in enumerate(sorted(breakdown.keys())):
+            colors[pid] = palette[i % len(palette)]
+        return colors
 
 
 class MemoryMonitorWindow(BaseWindow):
@@ -17,6 +75,18 @@ class MemoryMonitorWindow(BaseWindow):
         # Overall usage bar
         usage_frame = self._create_usage_frame()
         self.content_layout.addWidget(usage_frame)
+
+        # Block-level memory map
+        map_label = QLabel("Memory Map (blocks)")
+        map_label.setStyleSheet("color: #89b4fa; font-size: 12px; font-weight: bold; padding: 4px 0 2px 0;")
+        self.content_layout.addWidget(map_label)
+
+        self.memory_map = MemoryMapWidget(self.kernel.memory_manager)
+        self.content_layout.addWidget(self.memory_map)
+
+        # Legend
+        self.legend_frame = self._create_legend_frame()
+        self.content_layout.addWidget(self.legend_frame)
 
         # Stats grid
         stats_frame = self._create_stats_frame()
@@ -149,6 +219,35 @@ class MemoryMonitorWindow(BaseWindow):
         layout.addStretch()
         return frame
 
+    def _create_legend_frame(self):
+        frame = QFrame()
+        frame.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+                padding: 4px 0;
+            }
+            QLabel {
+                color: #cdd6f4;
+                font-size: 11px;
+                padding: 1px 4px;
+            }
+        """)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.legend_layout = QHBoxLayout()
+        self.legend_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self.legend_layout)
+        layout.addStretch()
+
+        # Free block legend (always shown)
+        free_label = QLabel()
+        free_label.setStyleSheet("background-color: #313244; color: #a6adc8; border: 1px solid #45475a; border-radius: 3px; padding: 2px 6px;")
+        free_label.setText("Free")
+        self.legend_layout.addWidget(free_label)
+
+        return frame
+
     def refresh(self):
         usage = self.kernel.memory_manager.get_usage()
         total_mb = usage["total"] // 1024
@@ -161,6 +260,27 @@ class MemoryMonitorWindow(BaseWindow):
         self.used_label.setText(f"{used_mb} MB")
         self.free_label.setText(f"{free_mb} MB")
         self.percent_label.setText(f"{percent}%")
+
+        # Repaint memory map
+        self.memory_map.update()
+
+        # Update legend with process colors
+        while self.legend_layout.count() > 1:
+            item = self.legend_layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+
+        palette = [
+            "#a6e3a1", "#89b4fa", "#f9e2af", "#cba6f7", "#fab387",
+            "#f38ba8", "#94e2d5", "#74c7ec", "#b4befe",
+        ]
+        breakdown = self.kernel.memory_manager.get_process_breakdown()
+        for i, (pid, info) in enumerate(sorted(breakdown.items())):
+            color = palette[i % len(palette)]
+            label = QLabel()
+            label.setStyleSheet(f"background-color: {color}; color: #1e1e2e; border-radius: 3px; padding: 2px 6px;")
+            label.setText(f"PID {pid}: {info['name']}")
+            self.legend_layout.addWidget(label)
 
         # Color based on usage
         if percent > 80:

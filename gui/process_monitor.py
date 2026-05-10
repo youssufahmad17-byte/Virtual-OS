@@ -88,12 +88,14 @@ class ProcessMonitorWindow(BaseWindow):
 
         self.total_label = QLabel("Total: 0")
         self.running_label = QLabel("Running: 0")
+        self.ready_label = QLabel("Ready: 0")
         self.sleeping_label = QLabel("Sleeping: 0")
         self.cpu_label = QLabel("CPU: 0%")
         self.mem_label = QLabel("Memory: 0 MB")
 
         bar_layout.addWidget(self.total_label)
         bar_layout.addWidget(self.running_label)
+        bar_layout.addWidget(self.ready_label)
         bar_layout.addWidget(self.sleeping_label)
         bar_layout.addStretch()
         bar_layout.addWidget(self.cpu_label)
@@ -169,11 +171,13 @@ class ProcessMonitorWindow(BaseWindow):
 
         total = len(procs)
         running = sum(1 for p in procs if p.state == "Running")
+        ready = sum(1 for p in procs if p.state == "Ready")
         sleeping = sum(1 for p in procs if p.state == "Sleeping")
         total_mem = self.kernel.process_manager.get_total_memory() // 1024
 
         self.total_label.setText(f"Total: {total}")
         self.running_label.setText(f"Running: {running}")
+        self.ready_label.setText(f"Ready: {ready}")
         self.sleeping_label.setText(f"Sleeping: {sleeping}")
         self.cpu_label.setText(f"CPU: {min(100, int(self.kernel.process_manager.get_total_cpu()))}%")
         self.mem_label.setText(f"Memory: {total_mem} MB")
@@ -181,6 +185,8 @@ class ProcessMonitorWindow(BaseWindow):
         for i, proc in enumerate(procs):
             state_color = {
                 "Running": "#a6e3a1",
+                "Ready": "#f9e2af",
+                "Waiting": "#cba6f7",
                 "Sleeping": "#89b4fa",
                 "Stopped": "#fab387",
                 "Zombie": "#f38ba8",

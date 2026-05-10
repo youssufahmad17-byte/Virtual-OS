@@ -1,9 +1,10 @@
 """Device Manager Window."""
 from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLabel, QFrame, QSplitter, QTextEdit, QHeaderView
+    QLabel, QFrame, QSplitter, QTextEdit, QHeaderView, QTableWidget,
+    QTableWidgetItem, QTabWidget, QWidget
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 from gui.window import BaseWindow
 
@@ -12,13 +13,62 @@ class DeviceManagerWindow(BaseWindow):
     """Device manager application window."""
 
     def __init__(self, kernel, parent=None):
-        super().__init__("Device Manager", kernel, width=800, height=550)
+        super().__init__("Device Manager", kernel, width=800, height=600)
 
         # Stats bar
         stats_bar = self._create_stats_bar()
         self.content_layout.addWidget(stats_bar)
 
-        # Main content
+        # Tab widget: Devices + I/O Requests
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+                background-color: #1e1e2e;
+            }
+            QTabBar::tab {
+                background-color: #313244;
+                color: #cdd6f4;
+                padding: 8px 16px;
+                border: none;
+                border-right: 1px solid #45475a;
+                font-size: 12px;
+            }
+            QTabBar::tab:selected {
+                background-color: #1e1e2e;
+                font-weight: bold;
+            }
+            QTabBar::tab:hover {
+                background-color: #45475a;
+            }
+        """)
+
+        # Devices tab
+        devices_tab = self._create_devices_tab()
+        self.tabs.addTab(devices_tab, "Devices")
+
+        # I/O Requests tab
+        io_tab = self._create_io_tab()
+        self.tabs.addTab(io_tab, "I/O Requests")
+
+        self.content_layout.addWidget(self.tabs)
+
+        # Action buttons
+        btn_bar = self._create_action_bar()
+        self.content_layout.addWidget(btn_bar)
+
+        # Auto refresh
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.refresh)
+        self.timer.start(2000)
+
+        self.refresh()
+
+    def _create_devices_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Device tree
@@ -53,13 +103,59 @@ class DeviceManagerWindow(BaseWindow):
         splitter.addWidget(details_panel)
 
         splitter.setSizes([450, 350])
-        self.content_layout.addWidget(splitter)
+        layout.addWidget(splitter)
 
-        # Action buttons
-        btn_bar = self._create_action_bar()
-        self.content_layout.addWidget(btn_bar)
+        return tab
 
-        self.refresh()
+    def _create_io_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # I/O stats bar
+        self.io_stats = QLabel("Pending: 0  |  Completed: 0")
+        self.io_stats.setStyleSheet("""
+            QLabel {
+                background-color: #313244;
+                color: #cdd6f4;
+                padding: 6px 12px;
+                font-size: 12px;
+                border-bottom: 1px solid #45475a;
+            }
+        """)
+        layout.addWidget(self.io_stats)
+
+        # I/O request table
+        self.io_table = QTableWidget()
+        self.io_table.setColumnCount(6)
+        self.io_table.setHorizontalHeaderLabels(["ID", "Device", "Type", "State", "Time", "Result"])
+        self.io_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #1e1e2e;
+                color: #cdd6f4;
+                border: none;
+                gridline-color: #313244;
+                font-size: 12px;
+            }
+            QTableWidget::item {
+                padding: 4px 8px;
+            }
+            QHeaderView::section {
+                background-color: #313244;
+                color: #cdd6f4;
+                padding: 6px;
+                border: none;
+                border-bottom: 2px solid #45475a;
+                font-weight: bold;
+            }
+        """)
+        self.io_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.io_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.io_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.io_table.verticalHeader().setVisible(False)
+        layout.addWidget(self.io_table)
+
+        return tab
 
     def _create_stats_bar(self):
         bar = QFrame()
@@ -193,6 +289,40 @@ class DeviceManagerWindow(BaseWindow):
 
         self.total_label.setText(f"Total Devices: {self.kernel.device_manager.get_device_count()}")
         self.online_label.setText(f"Online: {online}")
+
+        # Update I/O tab
+        self._refresh_io_tab()
+
+    def _refresh_io_tab(self):
+        requests = self.kernel.device_manager.get_io_requests()
+        self.io_table.setRowCount(len(requests))
+
+        pending = self.kernel.device_manager.get_io_pending_count()
+        completed = self.kernel.device_manager.io_queue.get_completed_count()
+        self.io_stats.setText(f"Pending: {pending}  |  Completed: {completed}")
+
+        state_colors = {
+            "Pending": "#f9e2af",
+            "Processing": "#89b4fa",
+            "Completed": "#a6e3a1",
+            "Failed": "#f38ba8",
+        }
+
+        for i, req in enumerate(requests):
+            d = req.to_dict()
+            items = [
+                str(d["id"]),
+                d["device"],
+                d["type"],
+                d["state"],
+                d["timestamp"],
+                d["result"],
+            ]
+            for j, text in enumerate(items):
+                item = QTableWidgetItem(text)
+                if j == 3:  # State column
+                    item.setForeground(QColor(state_colors.get(d["state"], "#cdd6f4")))
+                self.io_table.setItem(i, j, item)
 
     def _on_device_selected(self, current, previous):
         if not current:

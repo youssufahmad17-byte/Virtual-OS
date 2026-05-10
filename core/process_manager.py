@@ -5,9 +5,69 @@ import random
 
 class ProcessState:
     RUNNING = "Running"
+    READY = "Ready"
+    WAITING = "Waiting"
     SLEEPING = "Sleeping"
     STOPPED = "Stopped"
     ZOMBIE = "Zombie"
+
+
+class RoundRobinScheduler:
+    """Simple Round-Robin CPU scheduler."""
+
+    def __init__(self, time_quantum=3.0):
+        self.time_quantum = time_quantum
+        self.ready_queue = []
+        self.current_pid = None
+        self._elapsed = 0.0
+
+    def add_process(self, proc):
+        """Add a process to the ready queue."""
+        if proc not in self.ready_queue and proc.state == ProcessState.READY:
+            self.ready_queue.append(proc)
+
+    def remove_process(self, pid):
+        """Remove a process from the ready queue."""
+        self.ready_queue = [p for p in self.ready_queue if p.pid != pid]
+        if self.current_pid == pid:
+            self.current_pid = None
+
+    def schedule(self, processes):
+        """Run one scheduling cycle. Rotate processes and manage states."""
+        runnable = [p for p in processes if p.state == ProcessState.RUNNING]
+
+        if not runnable:
+            # Promote ready processes to running
+            promoted = []
+            for proc in list(self.ready_queue):
+                proc.state = ProcessState.RUNNING
+                promoted.append(proc)
+            self.ready_queue = []
+            if promoted:
+                self.current_pid = promoted[0].pid
+            return
+
+        self._elapsed += 0.1  # simulated 100ms tick
+
+        # Time quantum check — rotate if exceeded
+        if self._elapsed >= self.time_quantum:
+            self._elapsed = 0.0
+            current = next((p for p in runnable if p.pid == self.current_pid), None)
+            if current:
+                # Move current process to back of ready queue
+                current.state = ProcessState.READY
+                self.ready_queue.append(current)
+            # Promote next ready process
+            if self.ready_queue:
+                next_proc = self.ready_queue.pop(0)
+                next_proc.state = ProcessState.RUNNING
+                self.current_pid = next_proc.pid
+            elif len(runnable) > 1:
+                # Rotate among running
+                idx = next((i for i, p in enumerate(runnable) if p.pid == self.current_pid), -1)
+                if idx >= 0:
+                    next_idx = (idx + 1) % len(runnable)
+                    self.current_pid = runnable[next_idx].pid
 
 
 class Process:
@@ -51,6 +111,7 @@ class ProcessManager:
     def __init__(self):
         self._processes = {}
         self._next_pid = 1
+        self.scheduler = RoundRobinScheduler()
         self._init_system_processes()
 
     def _init_system_processes(self):
@@ -75,7 +136,9 @@ class ProcessManager:
         pid = self._next_pid
         self._next_pid += 1
         proc = Process(pid, name, ppid, memory)
+        proc.state = ProcessState.READY
         self._processes[pid] = proc
+        self.scheduler.add_process(proc)
         return proc
 
     def get_process(self, pid):
@@ -100,7 +163,9 @@ class ProcessManager:
         children = [p for p in self._processes.values() if p.ppid == pid]
         for child in children:
             child.state = ProcessState.ZOMBIE
+            self.scheduler.remove_process(child.pid)
         proc.state = ProcessState.ZOMBIE
+        self.scheduler.remove_process(pid)
         return True, ""
 
     def stop_process(self, pid):
@@ -120,7 +185,8 @@ class ProcessManager:
             return False, f"resume: ({pid}) - No such process"
         if proc.state == ProcessState.ZOMBIE:
             return False, f"resume: ({pid}) - Process is a zombie"
-        proc.state = ProcessState.RUNNING
+        proc.state = ProcessState.READY
+        self.scheduler.add_process(proc)
         return True, ""
 
     def cleanup_zombies(self):
@@ -129,6 +195,10 @@ class ProcessManager:
         for pid in zombies:
             del self._processes[pid]
         return len(zombies)
+
+    def schedule(self):
+        """Run the Round-Robin scheduler."""
+        self.scheduler.schedule(list(self._processes.values()))
 
     def get_process_count(self):
         return len(self._processes)

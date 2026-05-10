@@ -51,5 +51,7 @@ class Kernel:
 
     def update(self):
         """Called periodically to update system state."""
+        self.process_manager.schedule()
         self.process_manager.update_cpu_times()
         self.process_manager.cleanup_zombies()
+        self.device_manager.process_io()
