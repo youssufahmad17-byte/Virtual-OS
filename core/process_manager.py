@@ -155,8 +155,6 @@ class ProcessManager:
         proc = self._processes.get(pid)
         if proc is None:
             return False, f"kill: ({pid}) - No such process"
-        if pid <= 6:
-            return False, f"kill: ({pid}) - Operation not permitted (system process)"
         if proc.state == ProcessState.ZOMBIE:
             return False, f"kill: ({pid}) - Process already terminated"
         # Kill children too
@@ -172,10 +170,11 @@ class ProcessManager:
         proc = self._processes.get(pid)
         if proc is None:
             return False, f"stop: ({pid}) - No such process"
-        if pid <= 6:
-            return False, f"stop: ({pid}) - Operation not permitted"
         if proc.state == ProcessState.STOPPED:
             return False, f"stop: ({pid}) - Process already stopped"
+        if proc.state == ProcessState.ZOMBIE:
+            return False, f"stop: ({pid}) - Process is a zombie"
+        self.scheduler.remove_process(pid)
         proc.state = ProcessState.STOPPED
         return True, ""
 

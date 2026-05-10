@@ -1,7 +1,7 @@
 """Process Monitor Window - Task Manager."""
 from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLabel, QHeaderView, QFrame, QWidget
+    QLabel, QHeaderView, QFrame, QWidget, QMessageBox
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
@@ -218,24 +218,31 @@ class ProcessMonitorWindow(BaseWindow):
 
     def _kill_selected(self):
         pid = self._get_selected_pid()
-        if pid:
-            success, error = self.kernel.process_manager.kill_process(pid)
-            if success:
-                self.kernel.memory_manager.free(pid)
-                self.refresh()
+        if pid is None:
+            return
+        success, error = self.kernel.process_manager.kill_process(pid)
+        if success:
+            self.kernel.memory_manager.free(pid)
+            self.refresh()
+        else:
+            QMessageBox.warning(self, "Kill Failed", error)
 
     def _stop_selected(self):
         pid = self._get_selected_pid()
-        if pid:
-            success, error = self.kernel.process_manager.stop_process(pid)
-            if not success:
-                pass  # Silently fail
+        if pid is None:
+            return
+        success, error = self.kernel.process_manager.stop_process(pid)
+        if success:
             self.refresh()
+        else:
+            QMessageBox.warning(self, "Stop Failed", error)
 
     def _resume_selected(self):
         pid = self._get_selected_pid()
-        if pid:
-            success, error = self.kernel.process_manager.resume_process(pid)
-            if not success:
-                pass
+        if pid is None:
+            return
+        success, error = self.kernel.process_manager.resume_process(pid)
+        if success:
             self.refresh()
+        else:
+            QMessageBox.warning(self, "Resume Failed", error)
